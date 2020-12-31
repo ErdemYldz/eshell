@@ -13,6 +13,9 @@ import (
 // parceCmd parses the command and returns splitted slice from "|"
 func parseCmd(cmd string) []string {
 	var ret []string
+	if strings.TrimSpace(cmd) == "" {
+		return ret
+	}
 	cmds := strings.Split(cmd, "|")
 	for _, cmd := range cmds {
 		ret = append(ret, strings.Join(strings.Fields(cmd), " "))
@@ -77,15 +80,18 @@ func main() {
 	fmt.Print(prompt)
 	for r.Scan() {
 		in := r.Text()
-		var b bytes.Buffer
-		for _, cmd := range parseCmd(in) {
-			bufChan, errc := runCmd(cmd, &b)
-			if err := <-errc; err != nil {
-				fmt.Println("error in runCmd: ", err)
+		commands := parseCmd(in)
+		if commands != nil {
+			var b bytes.Buffer
+			for _, cmd := range commands {
+				ch, errc := runCmd(cmd, &b)
+				if err := <-errc; err != nil {
+					fmt.Println(err)
+				}
+				b = <-ch
 			}
-			b = <-bufChan
+			fmt.Println(b.String())
 		}
-		fmt.Println(b.String())
 
 		fmt.Print(prompt)
 	}
