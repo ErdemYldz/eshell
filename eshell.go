@@ -3,7 +3,10 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"log"
 	"os"
 	"os/exec"
 	"os/user"
@@ -114,7 +117,8 @@ var tokens = map[string]int{
 }
 
 var builtIn = map[string]func(string) error{
-	"cd": changeDirectory,
+	"cd":    changeDirectory,
+	"alias": alias,
 }
 
 // checks the command if it has > or >>
@@ -138,9 +142,12 @@ func parseRedirections(cmd, token string) []string {
 }
 
 func checkBuiltin(cmd string) (string, string, func(string) error) {
+	var param string
 	fields := strings.Fields(cmd)
-	if len(fields) > 2 {
-		return "", "", nil
+	// fmt.Printf("checkBuiltin: %#v\n", fields)
+	if len(fields) >= 2 {
+		param = strings.Join(fields[1:], " ")
+		// return "", "", nil
 	}
 	function, ok := builtIn[fields[0]]
 	if !ok {
@@ -151,7 +158,114 @@ func checkBuiltin(cmd string) (string, string, func(string) error) {
 		return fields[0], "~", function
 	}
 
-	return fields[0], fields[1], function
+	if len(fields) == 1 && fields[0] == "alias" {
+		return fields[0], "", function
+	}
+	return fields[0], param, function
+}
+
+func loadEshRC() error {
+	home, err := getHomeDir()
+	if err != nil {
+		return err
+	}
+	path := home + "/.eshrc"
+	// esherc := map[string]string{}
+	f, err := os.Open(path)
+	if err != nil {
+		fmt.Println("here after open")
+		return err
+	}
+	defer f.Close()
+
+	dec := json.NewDecoder(f)
+	err = dec.Decode(&aliases)
+	if err != nil {
+		fmt.Println("here after decoding")
+		return err
+	}
+	return nil
+}
+
+var aliases map[string]string
+
+func alias(parameter string) error {
+	if parameter == "" {
+		for k, v := range aliases {
+			fmt.Println(k, "->", v)
+
+		}
+		return nil
+	}
+	fields := strings.Split(parameter, "=")
+	key, value := fields[0], fields[1]
+	err := saveEshRC(key, value)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func checkEshRC() (bool, error) {
+	home, err := getHomeDir()
+	if err != nil {
+		return false, err
+	}
+	files, err := ioutil.ReadDir(home)
+	if err != nil {
+		return false, err
+	}
+	for _, file := range files {
+		if file.Name() == ".eshrc" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func createEshRC() error {
+	home, err := getHomeDir()
+	if err != nil {
+		return err
+	}
+
+	path := home + "/.eshrc"
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	enc := json.NewEncoder(f)
+	aliases := map[string]string{}
+	aliases["ll"] = "ls -la"
+	err = enc.Encode(aliases)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func saveEshRC(key, value string) error {
+	home, err := getHomeDir()
+	if err != nil {
+		return err
+	}
+	path := home + "/.eshrc"
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	enc := json.NewEncoder(f)
+	aliases[key] = value
+	err = enc.Encode(aliases)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func main() {
@@ -160,6 +274,22 @@ func main() {
 	if err != nil {
 		fmt.Println("error while creating prompt: ", err)
 		os.Exit(1)
+	}
+
+	found, err := checkEshRC()
+	if err != nil {
+		log.Fatalln("error while checking .eshrc:", err)
+	}
+	if !found {
+		err = createEshRC()
+		if err != nil {
+			log.Fatalln("error while creating eshrc")
+		}
+	}
+
+	err = loadEshRC()
+	if err != nil {
+		log.Fatalln("error while loading eshrc:", err)
 	}
 
 	r := bufio.NewScanner(os.Stdin)
@@ -174,10 +304,13 @@ func main() {
 		if commands != nil {
 			var b bytes.Buffer
 			for _, cmd := range commands {
+				if c, ok := aliases[cmd]; ok {
+					cmd = c
+				}
 				var filename string
 				var f *os.File
-				if command, path, function := checkBuiltin(cmd); command != "" {
-					err := function(path)
+				if command, param, function := checkBuiltin(cmd); command != "" {
+					err := function(param)
 					if err != nil {
 						fmt.Println(err)
 					}
