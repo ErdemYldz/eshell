@@ -12,16 +12,46 @@ import (
 )
 
 // parceCmd parses the command and returns splitted slice from "|"
-func parseCmd(cmd string) []string {
+func parseCmd(cmd string) ([]string, error) {
 	var ret []string
 	if strings.TrimSpace(cmd) == "" {
-		return ret
+		return ret, nil
 	}
 	cmds := strings.Split(cmd, "|")
 	for _, cmd := range cmds {
+		if strings.Contains(cmd, "~") {
+			home, err := getHomeDir()
+			if err != nil {
+				return nil, err
+			}
+			cmd = strings.Replace(cmd, "~", home, 1)
+		}
 		ret = append(ret, strings.Join(strings.Fields(cmd), " "))
 	}
-	return ret
+	return ret, nil
+}
+
+func changeDirectory(path string) error {
+	if strings.HasPrefix(path, "~") {
+		home, err := getHomeDir()
+		if err != nil {
+			return err
+		}
+		path = strings.Replace(path, "~", home, 1)
+	}
+	err := os.Chdir(path)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func getHomeDir() (string, error) {
+	us, err := user.Current()
+	if err != nil {
+		return "", err
+	}
+	return us.HomeDir, nil
 }
 
 // runCmd runs the command
@@ -83,6 +113,10 @@ var tokens = map[string]int{
 	">>": os.O_APPEND | os.O_CREATE | os.O_WRONLY,
 }
 
+var builtIn = map[string]func(string) error{
+	"cd": changeDirectory,
+}
+
 // checks the command if it has > or >>
 func checkCommand(cmd string) (string, int, bool) {
 	for k, v := range tokens {
@@ -103,7 +137,25 @@ func parseRedirections(cmd, token string) []string {
 	return ret
 }
 
+func checkBuiltin(cmd string) (string, string, func(string) error) {
+	fields := strings.Fields(cmd)
+	if len(fields) > 2 {
+		return "", "", nil
+	}
+	function, ok := builtIn[fields[0]]
+	if !ok {
+		return "", "", nil
+	}
+
+	if len(fields) == 1 && fields[0] == "cd" {
+		return fields[0], "~", function
+	}
+
+	return fields[0], fields[1], function
+}
+
 func main() {
+	var prompt string
 	prompt, err := getPrompt()
 	if err != nil {
 		fmt.Println("error while creating prompt: ", err)
@@ -114,12 +166,28 @@ func main() {
 	fmt.Print(prompt)
 	for r.Scan() {
 		in := r.Text()
-		commands := parseCmd(in)
+		commands, err := parseCmd(in)
+		if err != nil {
+			fmt.Println(err)
+			continue
+		}
 		if commands != nil {
 			var b bytes.Buffer
 			for _, cmd := range commands {
 				var filename string
 				var f *os.File
+				if command, path, function := checkBuiltin(cmd); command != "" {
+					err := function(path)
+					if err != nil {
+						fmt.Println(err)
+					}
+					prompt, err = getPrompt()
+					if err != nil {
+						fmt.Println("error while creating prompt: ", err)
+						os.Exit(1)
+					}
+					continue
+				}
 				if token, flag, ok := checkCommand(cmd); ok {
 					reds := parseRedirections(cmd, token)
 					fmt.Printf("after parsed reds: %#v\n", reds)
