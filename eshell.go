@@ -58,7 +58,7 @@ func getHomeDir() (string, error) {
 }
 
 // runCmd runs the command
-func runCmd(in string, b *bytes.Buffer) (<-chan bytes.Buffer, <-chan error) {
+func runCmd(in string, b *bytes.Buffer, last bool) (<-chan bytes.Buffer, <-chan error) {
 
 	ch := make(chan bytes.Buffer)
 	errc := make(chan error)
@@ -75,6 +75,10 @@ func runCmd(in string, b *bytes.Buffer) (<-chan bytes.Buffer, <-chan error) {
 		b.Reset()
 		cmd.Stdout = b
 		cmd.Stderr = b
+		if last && path == "less" {
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+		}
 
 		err := cmd.Run()
 		errc <- err
@@ -99,7 +103,7 @@ func getPrompt() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("%s@%s:~%s$ ", u.Username, hostName, cwd), err
+	return fmt.Sprintf("\033[93m\033[1m%s@%s:~%s$ \033[0m", u.Username, hostName, cwd), err
 
 }
 
@@ -301,9 +305,15 @@ func main() {
 			fmt.Println(err)
 			continue
 		}
-		if commands != nil {
+		length := len(commands)
+		if length != 0 {
 			var b bytes.Buffer
-			for _, cmd := range commands {
+			var last bool
+
+			for i, cmd := range commands {
+				if (i + 1) == length {
+					last = true
+				}
 				if c, ok := aliases[cmd]; ok {
 					cmd = c
 				}
@@ -343,7 +353,7 @@ func main() {
 					}
 				}
 
-				ch, errc := runCmd(cmd, &b)
+				ch, errc := runCmd(cmd, &b, last)
 				if err := <-errc; err != nil {
 					fmt.Println(err)
 				}
