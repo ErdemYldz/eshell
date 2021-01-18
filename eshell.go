@@ -146,7 +146,9 @@ func getPrompt() (string, error) {
 		return "", err
 	}
 
-	return fmt.Sprintf("\033[1;92m%s@%s\033[0m:\033[1;94m~%s$ \033[0m", u.Username, hostName, cwd), err
+	cwd = strings.Replace(cwd, u.HomeDir, "~", 1)
+
+	return fmt.Sprintf("\033[1;92m%s@%s\033[0m:\033[1;94m%s\033[0m$ ", u.Username, hostName, cwd), err
 
 }
 
