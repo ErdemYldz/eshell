@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
@@ -26,6 +27,37 @@ type state struct {
 
 const ioctlReadTermios = unix.TCGETS
 const ioctlWriteTermios = unix.TCSETS
+
+const keyTab = 9
+
+var tabCount int
+
+func tabCompletion(line string) ([]string, string) {
+	words := strings.Split(line, " ")
+	var word string
+	if len(words) > 1 {
+		word = words[1]
+	}
+	dir, err := os.Getwd()
+	if err != nil {
+		log.Fatalln("error while getting directory:", err)
+	}
+	// fmt.Println("dirname:", dir)
+	info, err := ioutil.ReadDir(dir)
+	if err != nil {
+		log.Fatalln("error while getting fileinfo:", err)
+	}
+	// fmt.Printf("info: %#v\n", info[0].Name())
+	var options []string
+	for _, v := range info {
+		fn := v.Name()
+		if strings.HasPrefix(fn, word) {
+			// fmt.Printf("%s\t", v.Name())
+			options = append(options, fn)
+		}
+	}
+	return options, word
+}
 
 func makeRaw(fd int) (*State, error) {
 	termios, err := unix.IoctlGetTermios(fd, ioctlReadTermios)
@@ -148,7 +180,7 @@ func getPrompt() (string, error) {
 
 	cwd = strings.Replace(cwd, u.HomeDir, "~", 1)
 
-	return fmt.Sprintf("\033[1;92m%s@%s\033[0m:\033[1;94m%s\033[0m$ ", u.Username, hostName, cwd), err
+	return fmt.Sprintf("\033[1;91m%s@%s\033[0m:\033[1;94m%s\033[0m$ ", u.Username, hostName, cwd), err
 
 }
 
@@ -349,22 +381,54 @@ func main() {
 		log.Fatalln("error while loading eshrc:", err)
 	}
 
-	// ******x/term
-	// oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+	err = os.Setenv("SHELL", "qwerty")
+	if err != nil {
+		log.Fatalln("error while settng env:", err)
+	}
+
 	oldState, err := makeRaw(int(os.Stdin.Fd()))
 	if err != nil {
-		panic(err)
+		log.Fatalln("error while making raw terminal:", err)
 	}
-	defer restore(0, oldState)
+	// defer restore(0, oldState)
 
 	t := term.NewTerminal(os.Stdin, prompt)
 
+	handlekeypress := func(line string, pos int, key rune) (string, int, bool) {
+		if key == keyTab && line != "" {
+			tabCount++
+			if tabCount > 1 {
+				fmt.Println("")
+				options, word := tabCompletion(line)
+				if len(options) == 1 {
+					newline := strings.Replace(line, word, options[0], 1)
+					t.Write([]byte("\n"))
+					return newline, pos, true // true yazmasını engelliyor
+				}
+				for _, v := range options {
+					fmt.Printf("%s\t", v)
+				}
+				fmt.Println("")
+			}
+			t.Write([]byte("\n"))
+			return line, pos, false // true yazmasını engelliyor
+		}
+		return line, pos, false
+	}
+	t.AutoCompleteCallback = handlekeypress
+
 	for {
 		in, err := t.ReadLine()
+		if err == io.EOF {
+			fmt.Println("in io.EOF:", err)
+			restore(0, oldState)
+			os.Exit(1)
+		}
 		if err != nil {
 			log.Println("error in t.ReadLine():", err)
 		}
 		if in == "exit" {
+			restore(0, oldState)
 			break
 		}
 		commands := parseCmd(in)
@@ -429,9 +493,10 @@ func main() {
 				err = pipeline(f, pipeCmds...)
 				if err != nil {
 					log.Printf(": %s\n", err)
-					t.Write([]byte("\n"))
+					t.Write([]byte(""))
 				}
 			}
 		}
+		// t.Write([]byte("\n"))
 	}
 }
