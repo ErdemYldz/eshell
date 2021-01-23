@@ -15,4 +15,6 @@ trash/
 
 **/*  
 !**/*.go
+!**/*.mod
+!**/*.sum
 !.gitignore

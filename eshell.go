@@ -9,7 +9,9 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"golang.org/x/sys/unix"
@@ -34,6 +36,32 @@ var tabCount int
 
 func tabCompletion(line string) ([]string, string) {
 	words := strings.Split(line, " ")
+	// fmt.Printf("%#v\n", words)
+	var options []string
+	var executable string
+	if len(words) == 1 {
+		executable = words[0]
+		env := os.Getenv("PATH")
+		paths := filepath.SplitList(env)
+		for _, p := range paths {
+			info, _ := ioutil.ReadDir(p) // discarding error on purpose
+			// if err != nil {
+			// 	log.Println("error while getting dir:", err)
+			// }
+			if len(info) == 0 {
+				continue
+			}
+			for _, v := range info {
+				fn := v.Name()
+				if strings.HasPrefix(fn, executable) {
+					options = append(options, fn)
+				}
+			}
+
+		}
+		tabCount = 0
+		return options, executable
+	}
 	var word string
 	if len(words) > 1 {
 		word = words[1]
@@ -48,7 +76,6 @@ func tabCompletion(line string) ([]string, string) {
 		log.Fatalln("error while getting fileinfo:", err)
 	}
 	// fmt.Printf("info: %#v\n", info[0].Name())
-	var options []string
 	for _, v := range info {
 		fn := v.Name()
 		if strings.HasPrefix(fn, word) {
@@ -56,6 +83,7 @@ func tabCompletion(line string) ([]string, string) {
 			options = append(options, fn)
 		}
 	}
+	tabCount = 0
 	return options, word
 }
 
@@ -357,6 +385,17 @@ func saveEshRC(key, value string) error {
 	return nil
 }
 
+func checkOptions(options []string) string {
+	sort.Strings(options)
+	shortest := options[0]
+	for _, word := range options[1:] {
+		if !strings.HasPrefix(word, shortest) {
+			return ""
+		}
+	}
+	return shortest
+}
+
 func main() {
 	var prompt string
 	prompt, err := getPrompt()
@@ -400,18 +439,22 @@ func main() {
 			if tabCount > 1 {
 				fmt.Println("")
 				options, word := tabCompletion(line)
-				if len(options) == 1 {
-					newline := strings.Replace(line, word, options[0], 1)
-					t.Write([]byte("\n"))
-					return newline, pos, true // true yazmasını engelliyor
+				if shortest := checkOptions(options); shortest != "" {
+					newline := strings.Replace(line, word, shortest, 1)
+					for _, v := range options {
+						fmt.Printf("%s\t", v)
+					}
+					fmt.Println("")
+					t.Write([]byte(""))
+					return newline, len(newline), true
 				}
+
 				for _, v := range options {
 					fmt.Printf("%s\t", v)
 				}
 				fmt.Println("")
 			}
-			t.Write([]byte("\n"))
-			return line, pos, false // true yazmasını engelliyor
+			t.Write([]byte(""))
 		}
 		return line, pos, false
 	}
