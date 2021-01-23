@@ -66,6 +66,14 @@ func tabCompletion(line string) ([]string, string) {
 	if len(words) > 1 {
 		word = words[1]
 	}
+	if strings.HasPrefix(word, "/") {
+		matches, err := filepath.Glob(word + "*")
+		if err != nil {
+			log.Println(err)
+		}
+		return matches, word
+	}
+
 	dir, err := os.Getwd()
 	if err != nil {
 		log.Fatalln("error while getting directory:", err)
@@ -439,20 +447,33 @@ func main() {
 			if tabCount > 1 {
 				fmt.Println("")
 				options, word := tabCompletion(line)
-				if shortest := checkOptions(options); shortest != "" {
-					newline := strings.Replace(line, word, shortest, 1)
+				if len(options) > 0 {
+					if shortest := checkOptions(options); shortest != "" {
+						if len(options) == 1 && word == "" {
+							newline := line + shortest
+							fmt.Println("")
+							t.Write([]byte(""))
+							return newline, len(newline), true
+						}
+						newline := strings.Replace(line, word, shortest, 1)
+						if len(options) == 1 {
+							fmt.Println("")
+							t.Write([]byte(""))
+							return newline, len(newline), true
+						}
+						for _, v := range options {
+							fmt.Printf("%s\t", v)
+						}
+						fmt.Println("")
+						t.Write([]byte(""))
+						return newline, len(newline), true
+					}
+
 					for _, v := range options {
 						fmt.Printf("%s\t", v)
 					}
 					fmt.Println("")
-					t.Write([]byte(""))
-					return newline, len(newline), true
 				}
-
-				for _, v := range options {
-					fmt.Printf("%s\t", v)
-				}
-				fmt.Println("")
 			}
 			t.Write([]byte(""))
 		}
